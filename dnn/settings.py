@@ -66,6 +66,7 @@ INSTALLED_APPS = [
     'portal',
     'rest_framework',
     'rest_framework_simplejwt',
+    'api'
     #'django_crontab',
     #'embed_video',
 ]

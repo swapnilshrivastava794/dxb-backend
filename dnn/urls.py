@@ -69,6 +69,7 @@ urlpatterns = [
 
    #for apk
    path('api/', include('post_management.api.urls')),
+   path('api-v2/', include('api.urls')),
 
 
     #sitmap end

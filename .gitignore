@@ -7,3 +7,4 @@ staticfiles/
 tmp/
 upload/
 static_collect/
+env/
