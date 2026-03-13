@@ -1,7 +1,7 @@
 import logging
 logger = logging.getLogger(__name__)
 from django.http import HttpResponse
-from django.db.models import Q
+from django.db.models import Q, F
 from post_management.models import category,sub_category,NewsPost,VideoNews,Tag
 from setting.models import profile_setting, CMS
 from Ad_management.models import ad_category
@@ -32,202 +32,375 @@ from PIL import ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 from django_user_agents.utils import get_user_agent
 
+STATUS_ACTIVE = "active"
+IS_ACTIVE = 1
+
 
 # home-pahe---------
 def home(request):
-    seo=seo_optimization.objects.get(pageslug='https://www.dxbnewsnetwork.com')
-    current_datetime = datetime.now()
-    blogdata=NewsPost.objects.filter(schedule_date__lt=current_datetime,is_active=1,status='active').order_by('-id')[:10]
-    mainnews=NewsPost.objects.filter(schedule_date__lt=current_datetime,status='active').order_by('order')[:4]
-    events=NewsPost.objects.filter(schedule_date__lt=current_datetime,Event=1,status='active').order_by('-id')[:10]
-    past_events = NewsPost.objects.filter(Event=1,Eventend_date__lt=current_datetime,status='active').order_by('-Eventend_date')[:10]
-    upcoming_events = NewsPost.objects.filter(Event=1,Event_date__gt=current_datetime,status='active').order_by('Event_date')[:10]
-    ongoing_events = NewsPost.objects.filter(Event=1,Event_date__lte=current_datetime,Eventend_date__gte=current_datetime,status='active').order_by('Eventend_date')[:10]
-    bp=BrandPartner.objects.filter(is_active=1).order_by('-id')[:30]
-    articales=NewsPost.objects.filter(schedule_date__lt=current_datetime,articles=1,status='active').order_by('-id')[:12]
-    headline=NewsPost.objects.filter(schedule_date__lt=current_datetime,Head_Lines=1,status='active').order_by('-id')[:4]
-    trending=NewsPost.objects.filter(schedule_date__lt=current_datetime,trending=1,status='active').order_by('-id')[:6]
-    brknews=NewsPost.objects.filter(BreakingNews=1,status='active').order_by('-id')[:4]
-    user_news = NewsPost.objects.filter(schedule_date__lt=current_datetime, journalist_id__isnull=False, status='active').order_by('-id')[:10]
-    tags = Tag.objects.filter(is_active=1).order_by('-id')[:10]
-    profiles = Journalist.objects.filter(status='active').exclude(registration_type='journalist').order_by('-id')[:6]
-    Category = category.objects.filter(cat_status='active').order_by('order')[:12]
+    current_datetime = timezone.now()
+
+    # ---------------- BASE NEWS QUERY ----------------
+    base_news = NewsPost.objects.select_related(
+        "journalist",
+        "post_cat",
+        "post_cat__sub_cat"
+    ).filter(
+        status="active",
+        schedule_date__lt=current_datetime
+    )
+
+    # ---------------- SEO ----------------
+    seo = seo_optimization.objects.filter(
+        pageslug="https://www.dxbnewsnetwork.com"
+    ).first()
+
+    # ---------------- NEWS ----------------
+    blogdata = base_news.filter(is_active=1).order_by("-id")[:10]
+
+    mainnews = base_news.order_by("order")[:4]
+
+    events = base_news.filter(Event=1).order_by("-id")[:10]
+
+    past_events = NewsPost.objects.filter(
+        Event=1,
+        status="active",
+        Eventend_date__lt=current_datetime
+    ).order_by("-Eventend_date")[:10]
+
+    upcoming_events = NewsPost.objects.filter(
+        Event=1,
+        status="active",
+        Event_date__gt=current_datetime
+    ).order_by("Event_date")[:10]
+
+    ongoing_events = NewsPost.objects.filter(
+        Event=1,
+        status="active",
+        Event_date__lte=current_datetime,
+        Eventend_date__gte=current_datetime
+    ).order_by("Eventend_date")[:10]
+
+    articles = base_news.filter(articles=1).order_by("-id")[:12]
+
+    headline = base_news.filter(Head_Lines=1).order_by("-id")[:4]
+
+    trending = base_news.filter(trending=1).order_by("-id")[:6]
+
+    brknews = NewsPost.objects.select_related(
+        "journalist",
+        "post_cat"
+    ).filter(
+        BreakingNews=1,
+        status="active"
+    ).order_by("-id")[:4]
+
+    user_news = base_news.filter(
+        journalist_id__isnull=False
+    ).order_by("-id")[:10]
+
+    # ---------------- TAGS ----------------
+    tags = Tag.objects.filter(is_active=1).order_by("-id")[:10]
+
+    # ---------------- JOURNALISTS ----------------
+    profiles = Journalist.objects.filter(
+        status="active"
+    ).exclude(
+        registration_type="journalist"
+    ).order_by("-id")[:6]
+
+    # ---------------- BRAND PARTNERS ----------------
+    bp = BrandPartner.objects.filter(is_active=1).order_by("-id")[:30]
+
+    # ---------------- CATEGORY WITH PREFETCH ----------------
+    categories = category.objects.prefetch_related(
+        "sub_category_set"
+    ).filter(
+        cat_status="active"
+    ).order_by("order")[:12]
+
     grouped_postsdata = {}
 
-    for cat in Category:
+    for cat in categories:
         subcategories = cat.sub_category_set.all()
-        category_posts = NewsPost.objects.filter(Q(post_cat__in=subcategories), is_active=1, status='active', schedule_date__lte=timezone.now()).order_by('-schedule_date')[:9]
 
-        grouped_postsdata[cat] = {"subcategories": subcategories, "posts": category_posts,}
+        posts = base_news.filter(
+            post_cat__in=subcategories,
+            is_active=1
+        ).order_by("-schedule_date")[:9]
 
-    grouped_postsdata_items = list(grouped_postsdata.items())
-    grouped_postsdata1 = dict(grouped_postsdata_items[:2])
-    grouped_postsdata2 = dict(grouped_postsdata_items[2:])
-    
-    uae_voice = NewsPost.objects.filter(post_cat__order=23,post_cat__sub_cat__order=1,status='active')[:8]
+        grouped_postsdata[cat] = {
+            "subcategories": subcategories,
+            "posts": posts
+        }
+
+    grouped_items = list(grouped_postsdata.items())
+
+    grouped_postsdata1 = dict(grouped_items[:2])
+    grouped_postsdata2 = dict(grouped_items[2:])
+
+    # ---------------- UAE VOICE ----------------
+    uae_voice = base_news.filter(
+        post_cat__order=23,
+        post_cat__sub_cat__order=1
+    )[:8]
+
+    # ---------------- VIDEO ----------------
+    videos_base = VideoNews.objects.select_related(
+        "News_Category"
+    ).filter(is_active="active")
+
+    truet = videos_base.filter(
+        video_type="reel",
+        News_Category=75
+    ).order_by("-id")[:8]
+
+    recipe = videos_base.filter(
+        video_type="reel",
+        News_Category=76
+    ).order_by("-id")[:8]
+
+    podcast = videos_base.filter(
+        video_type="video",
+        Head_Lines=1
+    ).order_by("order")[:2]
+
+    mainvid = videos_base.filter(
+        video_type="video",
+        order__range=[3, 6]
+    ).order_by("order")[:4]
+
+    video = videos_base.filter(
+        video_type="video"
+    ).order_by("order")[:4]
+
+    reel = videos_base.filter(
+        video_type="reel"
+    ).order_by("-id")[:16]
+
+    vidarticles = videos_base.filter(
+        video_type="video",
+        articles=1
+    ).order_by("order")[:3]
+
+    # ---------------- ADS ----------------
+    ad_categories = ad_category.objects.in_bulk(field_name="ads_cat_slug")
+
+    ads = ad.objects.select_related(
+        "ads_cat"
+    ).filter(is_active=1)
+
+    def get_ads(slug, limit):
+        cat = ad_categories.get(slug)
+        if not cat:
+            return []
+        return ads.filter(ads_cat_id=cat.id).order_by("-id")[:limit]
+
+    leftsquare = get_ads("left-fest-square", 4)
+    adtopleft = get_ads("topleft-600x80", 1)
+    adtopright = get_ads("topright-600x80", 1)
+    adtop = get_ads("leaderboard", 1)
+    adleft = get_ads("skyscraper", 1)
+    adright = get_ads("mrec", 1)
+    festive = get_ads("festivebg", 1)
+    tophead = get_ads("topad", 1)
+    popupad = get_ads("popup", 1)
+
+    # ---------------- MISC ----------------
+    slider = NewsPost.objects.select_related(
+        "journalist"
+    ).order_by("-id")[:5]
+
+    latestnews = NewsPost.objects.select_related(
+        "journalist"
+    ).order_by("-id")[:5]
 
     user_agent = get_user_agent(request)
     is_mobile = user_agent.is_mobile
-    
-    truet=VideoNews.objects.filter(is_active='active',video_type='reel',News_Category=75).order_by('-id')[:8]
-    recipe=VideoNews.objects.filter(is_active='active',video_type='reel',News_Category=76).order_by('-id')[:8]
-# --------------video-post-manage--------------
-    podcast=VideoNews.objects.filter(is_active='active',video_type='video',Head_Lines=1).order_by('order')[:2]
-    mainvid=VideoNews.objects.filter(is_active='active',video_type='video',order__range=[3, 6]).order_by('order')[:4]
-    video=VideoNews.objects.filter(is_active='active',video_type='video').order_by('order')[:4]
-    reel=VideoNews.objects.filter(is_active='active',video_type='reel').order_by('-id')[:16]
-    vidarticales=VideoNews.objects.filter(articles=1,is_active='active',video_type='video').order_by('order')[:3]
-# --------------ad-manage-meny--------------
-    lfsid=ad_category.objects.get(ads_cat_slug='left-fest-square')
-    leftsquqre=ad.objects.filter(ads_cat_id=lfsid.id, is_active=1).order_by('-id') [:4]
-    
-    adtlid=ad_category.objects.get(ads_cat_slug='topleft-600x80')
-    adtopleft=ad.objects.filter(ads_cat_id=adtlid.id, is_active=1).order_by('-id') [:1]
-    
-    adtrid=ad_category.objects.get(ads_cat_slug='topright-600x80')
-    adtopright=ad.objects.filter(ads_cat_id=adtrid.id, is_active=1).order_by('-id') [:1]
-    
-    adtopid=ad_category.objects.get(ads_cat_slug='leaderboard')
-    adtop=ad.objects.filter(ads_cat_id=adtopid.id, is_active=1).order_by('-id') [:1]
-    
-    adleftid=ad_category.objects.get(ads_cat_slug='skyscraper')
-    adleft=ad.objects.filter(ads_cat_id=adleftid.id, is_active=1).order_by('-id') [:1]
-    
-    adrcol=ad_category.objects.get(ads_cat_slug='mrec')
-    adright=ad.objects.filter(ads_cat_id=adrcol.id, is_active=1).order_by('-id') [:1]
-    
-    festbg=ad_category.objects.get(ads_cat_slug='festivebg')
-    festive=ad.objects.filter(ads_cat_id=festbg.id, is_active=1).order_by('-id') [:1]
-    # header--to--ad---
-    topad=ad_category.objects.get(ads_cat_slug='topad')
-    tophead=ad.objects.filter(ads_cat_id=topad.id, is_active=1).order_by('-id') [:1]
-    
-    popup=ad_category.objects.get(ads_cat_slug='popup')
-    popupad=ad.objects.filter(ads_cat_id=popup.id, is_active=1).order_by('-id') [:1]
-# -------------end-ad-manage-meny--------------    
-    # slider=NewsPost.objects.filter(id=1).order_by('id')[:5] use for filter value
-    
-    slider=NewsPost.objects.filter().order_by('-id')[:5]
-    latestnews=NewsPost.objects.all().order_by('-id')[:5]
-    data={
-            'indseo':seo,
-            'LatestNews':blogdata,
-            'mainnews':mainnews,
-            'events':events,
-            'bplogo':bp,
-            'Slider':slider,
-            'Blogcat':Category,
-            'latnews':latestnews,
-            'adtop':adtop,
-            'adleft':adleft,
-            'adright':adright,
-            'adtl':adtopleft,
-            'adtr':adtopright,
-            'bgad':festive,
-            'headtopad':tophead,
-            'popup':popupad,
-            'lfs':leftsquqre,
-            'Articale':articales,
-            'vidart':vidarticales,
-            'headline':headline,
-            'trendpost':trending,
-            'bnews':brknews,
-            'vidnews':podcast,
-            'MainV':mainvid,
-            'videos':video,
-            'Reels':reel,
-            'recipe':recipe,
-            'tt':truet,
-            'grouped_postsdata': grouped_postsdata1,
-            'grouped_postsdata2': grouped_postsdata2,
-            'usernews': user_news,
-            'profiles': profiles,
-            'past_events': past_events,
-            'upcoming_events': upcoming_events,
-            'ongoing_events': ongoing_events,
-            'now': current_datetime,
-            'tags': tags,
-            'is_mobile': is_mobile,
-            'uae_voice': uae_voice,
-        }
-    if request.user_agent.is_mobile:
-        return render(request, 'mobile/index.html',data)
-    else:
-        return render(request,'index.html',data)
-    
+
+    data = {
+        "indseo": seo,
+        "LatestNews": blogdata,
+        "mainnews": mainnews,
+        "events": events,
+        "bplogo": bp,
+        "Slider": slider,
+        "Blogcat": categories,
+        "latnews": latestnews,
+        "adtop": adtop,
+        "adleft": adleft,
+        "adright": adright,
+        "adtl": adtopleft,
+        "adtr": adtopright,
+        "bgad": festive,
+        "headtopad": tophead,
+        "popup": popupad,
+        "lfs": leftsquare,
+        "Articale": articles,
+        "vidart": vidarticles,
+        "headline": headline,
+        "trendpost": trending,
+        "bnews": brknews,
+        "vidnews": podcast,
+        "MainV": mainvid,
+        "videos": video,
+        "Reels": reel,
+        "recipe": recipe,
+        "tt": truet,
+        "grouped_postsdata": grouped_postsdata1,
+        "grouped_postsdata2": grouped_postsdata2,
+        "usernews": user_news,
+        "profiles": profiles,
+        "past_events": past_events,
+        "upcoming_events": upcoming_events,
+        "ongoing_events": ongoing_events,
+        "now": current_datetime,
+        "tags": tags,
+        "is_mobile": is_mobile,
+        "uae_voice": uae_voice,
+    }
+
+    template = "mobile/index.html" if is_mobile else "index.html"
+
+    return render(request, template, data)
+  
 
 # News-details-page----------
-def newsdetails(request,slug):
-    counter=NewsPost.objects.get(slug=slug)
-    counter.viewcounter=counter.viewcounter + 1
-    counter.save()
-    seo='ndetail'
-    current_datetime = datetime.now()
-    blogdetails=get_object_or_404(NewsPost, slug=slug, status='active')
-    blogdata=NewsPost.objects.filter(schedule_date__lt=current_datetime,is_active=1,status='active').order_by('-id') [:9]
-    mainnews=NewsPost.objects.filter(schedule_date__lt=current_datetime,is_active=1,status='active').order_by('-id') [:2]
-    articales=NewsPost.objects.filter(schedule_date__lt=current_datetime,articles=1,status='active').order_by('-id') [:3]
-    headline=NewsPost.objects.filter(schedule_date__lt=current_datetime,Head_Lines=1,status='active').order_by('-id')[:4]
-    trending=NewsPost.objects.filter(schedule_date__lt=current_datetime,trending=1,status='active').order_by('-id') [:8]
-    brknews=NewsPost.objects.filter(schedule_date__lt=current_datetime,BreakingNews=1,status='active').order_by('-id') [:8]
-    podcast=VideoNews.objects.filter(is_active='active').order_by('-id') [:1]
-    vidarticales=VideoNews.objects.filter(articles=1,is_active='active',video_type='video').order_by('order')[:2]
-    # --------------ad-manage-meny--------------
-    lfsid=ad_category.objects.get(ads_cat_slug='left-fest-square')
-    leftsquqre=ad.objects.filter(ads_cat_id=lfsid.id, is_active=1).order_by('-id') [:4]
-    
-    adtlid=ad_category.objects.get(ads_cat_slug='topleft-600x80')
-    adtopleft=ad.objects.filter(ads_cat_id=adtlid.id, is_active=1).order_by('-id') [:1]
-    
-    adtrid=ad_category.objects.get(ads_cat_slug='topright-600x80')
-    adtopright=ad.objects.filter(ads_cat_id=adtrid.id, is_active=1).order_by('-id') [:1]
-    
-    adtopid=ad_category.objects.get(ads_cat_slug='leaderboard')
-    adtop=ad.objects.filter(ads_cat_id=adtopid.id, is_active=1).order_by('-id') [:1]
-    
-    adleftid=ad_category.objects.get(ads_cat_slug='skyscraper')
-    adleft=ad.objects.filter(ads_cat_id=adleftid.id, is_active=1).order_by('-id') [:1]
-    
-    adrcol=ad_category.objects.get(ads_cat_slug='mrec')
-    adright=ad.objects.filter(ads_cat_id=adrcol.id, is_active=1).order_by('-id') [:1]
-    
-    festbg=ad_category.objects.get(ads_cat_slug='festivebg')
-    festive=ad.objects.filter(ads_cat_id=festbg.id, is_active=1).order_by('-id') [:1]
-    # festivetop
-    # festiveleft
-    # festiveright
-# -------------end-ad-manage-meny--------------    
-    # slider=NewsPost.objects.filter(id=1).order_by('id')[:5] use for filter value
-    Category=category.objects.filter(cat_status='active').order_by('order') [:12]
-    slider=NewsPost.objects.filter().order_by('-id')[:5]
-    latestnews=NewsPost.objects.all().order_by('-id')[:5]
+def newsdetails(request, slug):
+
+    current_datetime = timezone.now()
+
+    # ---------------- VIEW COUNTER ----------------
+    NewsPost.objects.filter(slug=slug).update(
+        viewcounter=F("viewcounter") + 1
+    )
+
+    # ---------------- BLOG DETAILS ----------------
+    blogdetails = get_object_or_404(
+        NewsPost.objects.select_related(
+            "journalist",
+            "post_cat",
+            "post_cat__sub_cat"
+        ),
+        slug=slug,
+        status=STATUS_ACTIVE
+    )
+
+    # ---------------- BASE NEWS QUERY ----------------
+    base_news = NewsPost.objects.select_related(
+        "journalist",
+        "post_cat",
+        "post_cat__sub_cat"
+    ).filter(
+        schedule_date__lt=current_datetime,
+        status=STATUS_ACTIVE
+    )
+
+    # ---------------- NEWS ----------------
+    blogdata = base_news.filter(
+        is_active=IS_ACTIVE
+    ).order_by("-id")[:9]
+
+    mainnews = base_news.filter(
+        is_active=IS_ACTIVE
+    ).order_by("-id")[:2]
+
+    articales = base_news.filter(
+        articles=1
+    ).order_by("-id")[:3]
+
+    headline = base_news.filter(
+        Head_Lines=1
+    ).order_by("-id")[:4]
+
+    trending = base_news.filter(
+        trending=1
+    ).order_by("-id")[:8]
+
+    brknews = base_news.filter(
+        BreakingNews=1
+    ).order_by("-id")[:8]
+
+    # ---------------- VIDEO ----------------
+    videos_base = VideoNews.objects.select_related(
+        "News_Category"
+    ).filter(is_active=STATUS_ACTIVE)
+
+    podcast = videos_base.order_by("-id")[:1]
+
+    vidarticales = videos_base.filter(
+        articles=1,
+        video_type="video"
+    ).order_by("order")[:2]
+
+    # ---------------- ADS ----------------
+    ad_categories = ad_category.objects.in_bulk(field_name="ads_cat_slug")
+
+    ads = ad.objects.select_related("ads_cat").filter(is_active=IS_ACTIVE)
+
+    def get_ads(slug, limit):
+        cat = ad_categories.get(slug)
+        if not cat:
+            return []
+        return ads.filter(ads_cat_id=cat.id).order_by("-id")[:limit]
+
+    leftsquqre = get_ads("left-fest-square", 4)
+    adtopleft = get_ads("topleft-600x80", 1)
+    adtopright = get_ads("topright-600x80", 1)
+    adtop = get_ads("leaderboard", 1)
+    adleft = get_ads("skyscraper", 1)
+    adright = get_ads("mrec", 1)
+    festive = get_ads("festivebg", 1)
+
+    # ---------------- CATEGORY ----------------
+    Category = category.objects.prefetch_related(
+        "sub_category_set"
+    ).filter(
+        cat_status=STATUS_ACTIVE
+    ).order_by("order")[:12]
+
+    # ---------------- SLIDER ----------------
+    slider = NewsPost.objects.select_related(
+        "journalist"
+    ).order_by("-id")[:5]
+
+    latestnews = NewsPost.objects.select_related(
+        "journalist"
+    ).order_by("-id")[:5]
+
+    # ---------------- USER AGENT ----------------
     user_agent = get_user_agent(request)
     is_mobile = user_agent.is_mobile
-    data={
-            'indseo':seo,
-            'Blogdetails':blogdetails,
-            'BlogData':blogdata,
-            'mainnews':mainnews,
-            'Slider':slider,
-            'Blogcat':Category,
-            'latnews':latestnews,
-            'adtop':adtop,
-            'adleft':adleft,
-            'adright':adright,
-            'adtl':adtopleft,
-            'adtr':adtopright,
-            'bgad':festive,
-            'lfs':leftsquqre,
-            'Articale':articales,
-            'vidart':vidarticales,
-            'headline':headline,
-            'trendpost':trending,
-            'bnews':brknews,
-            'vidnews':podcast,
-            'is_mobile': is_mobile,
-        }
-    return render(request,'news-details.html',data)
-    #return render(request, 'index.html')
+
+    # ---------------- SEO ----------------
+    seo = "ndetail"
+
+    data = {
+        "indseo": seo,
+        "Blogdetails": blogdetails,
+        "BlogData": blogdata,
+        "mainnews": mainnews,
+        "Slider": slider,
+        "Blogcat": Category,
+        "latnews": latestnews,
+        "adtop": adtop,
+        "adleft": adleft,
+        "adright": adright,
+        "adtl": adtopleft,
+        "adtr": adtopright,
+        "bgad": festive,
+        "lfs": leftsquqre,
+        "Articale": articales,
+        "vidart": vidarticales,
+        "headline": headline,
+        "trendpost": trending,
+        "bnews": brknews,
+        "vidnews": podcast,
+        "is_mobile": is_mobile,
+    }
+
+    return render(request, "news-details.html", data)  
+    
 # News-details-page--end--------
 # News-pdf--------
 def GetNewsPdf(request):
@@ -454,91 +627,163 @@ def AllNews(request,slug):
 
 
 # Video-all-News-details-----------
-def AllvideoNews(request,slug):
-    alnslug='/all-video-news/'+ slug
-    seo=seo_optimization.objects.get(pageslug=alnslug)
-    
-    if slug == 'articles':
-        blogdata=VideoNews.objects.filter(articles=1,is_active='active',video_type='video').order_by('-id')
-    elif slug == 'breaking':
-        blogdata=VideoNews.objects.filter(BreakingNews=1,is_active='active',video_type='video').order_by('-id') [:100]
-    elif slug == 'head-lines':
-        blogdata=VideoNews.objects.filter(Head_Lines=1,is_active='active',video_type='video').order_by('-id') [:100]
-    elif slug == 'trending':
-        blogdata=VideoNews.objects.filter(trending=1,is_active='active',video_type='video').order_by('-id') [:100]
-    elif slug == 'stories':
-        blogdata=VideoNews.objects.filter(is_active='active',video_type='reel').order_by('-id')
+def AllvideoNews(request, slug):
+
+    alnslug = "/all-video-news/" + slug
+
+    seo = seo_optimization.objects.select_related().get(pageslug=alnslug)
+
+    # ---------------- BASE VIDEO QUERY ----------------
+    videos_base = VideoNews.objects.select_related(
+        "News_Category"
+    ).filter(
+        is_active=STATUS_ACTIVE
+    )
+
+    # ---------------- VIDEO FILTER ----------------
+    if slug == "articles":
+        blogdata = videos_base.filter(
+            articles=1,
+            video_type="video"
+        ).order_by("-id")
+
+    elif slug == "breaking":
+        blogdata = videos_base.filter(
+            BreakingNews=1,
+            video_type="video"
+        ).order_by("-id")[:100]
+
+    elif slug == "head-lines":
+        blogdata = videos_base.filter(
+            Head_Lines=1,
+            video_type="video"
+        ).order_by("-id")[:100]
+
+    elif slug == "trending":
+        blogdata = videos_base.filter(
+            trending=1,
+            video_type="video"
+        ).order_by("-id")[:100]
+
+    elif slug == "stories":
+        blogdata = videos_base.filter(
+            video_type="reel"
+        ).order_by("-id")
+
     else:
-        blogdata=VideoNews.objects.filter(is_active='active',video_type='video').order_by('-id')
-        
-    mainnews=NewsPost.objects.filter(status='active').order_by('order')[:4]
-    events=NewsPost.objects.filter(Event=1,status='active').order_by('-id') [:10]
-    bp=BrandPartner.objects.filter(is_active=1).order_by('-id') [:20]
-    articales=NewsPost.objects.filter(articles=1,status='active').order_by('-id') [:3]
-    vidarticales=VideoNews.objects.filter(articles=1,is_active='active',video_type='video').order_by('order')[:2]
-    headline=NewsPost.objects.filter(Head_Lines=1,status='active').order_by('-id') [:14]
-    trending=NewsPost.objects.filter(trending=1,status='active').order_by('-id') [:7]
-    brknews=NewsPost.objects.filter(BreakingNews=1,status='active').order_by('-id') [:8]
-    podcast=VideoNews.objects.filter(is_active='active').order_by('-id') [:2]
-    Category=category.objects.filter(cat_status='active').order_by('order') [:12]
-# --------------ad-manage-meny--------------
-    adtlid=ad_category.objects.get(ads_cat_slug='topleft-600x80')
-    adtopleft=ad.objects.filter(ads_cat_id=adtlid.id, is_active=1).order_by('-id') [:1]
-    
-    adtrid=ad_category.objects.get(ads_cat_slug='topright-600x80')
-    adtopright=ad.objects.filter(ads_cat_id=adtrid.id, is_active=1).order_by('-id') [:1]
-    
-    adtopid=ad_category.objects.get(ads_cat_slug='leaderboard')
-    adtop=ad.objects.filter(ads_cat_id=adtopid.id, is_active=1).order_by('-id') [:1]
-    
-    adleftid=ad_category.objects.get(ads_cat_slug='skyscraper')
-    adleft=ad.objects.filter(ads_cat_id=adleftid.id, is_active=1).order_by('-id') [:1]
-    
-    adrcol=ad_category.objects.get(ads_cat_slug='mrec')
-    adright=ad.objects.filter(ads_cat_id=adrcol.id, is_active=1).order_by('-id') [:1]
-    
-    festbg=ad_category.objects.get(ads_cat_slug='festivebg')
-    festive=ad.objects.filter(ads_cat_id=festbg.id, is_active=1).order_by('-id') [:1]
-    
-    topad=ad_category.objects.get(ads_cat_slug='topad')
-    tophead=ad.objects.filter(ads_cat_id=topad.id, is_active=1).order_by('-id') [:1]
-    popup=ad_category.objects.get(ads_cat_slug='popup')
-    popupad=ad.objects.filter(ads_cat_id=popup.id, is_active=1).order_by('-id') [:1]
-# -------------end-ad-manage-meny--------------    
-    # slider=NewsPost.objects.filter(id=1).order_by('id')[:5] use for filter value
-    
-    slider=NewsPost.objects.filter().order_by('-id')[:5]
-    latestnews=NewsPost.objects.all().order_by('-id')[:5]
+        blogdata = videos_base.filter(
+            video_type="video"
+        ).order_by("-id")
+
+    # ---------------- BASE NEWS QUERY ----------------
+    news_base = NewsPost.objects.select_related(
+        "journalist",
+        "post_cat",
+        "post_cat__sub_cat"
+    ).filter(status=STATUS_ACTIVE)
+
+    mainnews = news_base.order_by("order")[:4]
+
+    events = news_base.filter(
+        Event=1
+    ).order_by("-id")[:10]
+
+    articales = news_base.filter(
+        articles=1
+    ).order_by("-id")[:3]
+
+    headline = news_base.filter(
+        Head_Lines=1
+    ).order_by("-id")[:14]
+
+    trending = news_base.filter(
+        trending=1
+    ).order_by("-id")[:7]
+
+    brknews = news_base.filter(
+        BreakingNews=1
+    ).order_by("-id")[:8]
+
+    # ---------------- BRAND PARTNERS ----------------
+    bp = BrandPartner.objects.filter(
+        is_active=IS_ACTIVE
+    ).order_by("-id")[:20]
+
+    # ---------------- VIDEO RELATED ----------------
+    vidarticales = videos_base.filter(
+        articles=1,
+        video_type="video"
+    ).order_by("order")[:2]
+
+    podcast = videos_base.order_by("-id")[:2]
+
+    # ---------------- CATEGORY ----------------
+    Category = category.objects.prefetch_related(
+        "sub_category_set"
+    ).filter(
+        cat_status=STATUS_ACTIVE
+    ).order_by("order")[:12]
+
+    # ---------------- ADS OPTIMIZED ----------------
+    ad_categories = ad_category.objects.in_bulk(field_name="ads_cat_slug")
+
+    ads = ad.objects.select_related(
+        "ads_cat"
+    ).filter(is_active=IS_ACTIVE)
+
+    def get_ads(slug, limit):
+        cat = ad_categories.get(slug)
+        if not cat:
+            return []
+        return ads.filter(
+            ads_cat_id=cat.id
+        ).order_by("-id")[:limit]
+
+    adtopleft = get_ads("topleft-600x80", 1)
+    adtopright = get_ads("topright-600x80", 1)
+    adtop = get_ads("leaderboard", 1)
+    adleft = get_ads("skyscraper", 1)
+    adright = get_ads("mrec", 1)
+    festive = get_ads("festivebg", 1)
+    tophead = get_ads("topad", 1)
+    popupad = get_ads("popup", 1)
+
+    # ---------------- SLIDER ----------------
+    slider = news_base.order_by("-id")[:5]
+
+    latestnews = news_base.order_by("-id")[:5]
+
+    # ---------------- USER AGENT ----------------
     user_agent = get_user_agent(request)
     is_mobile = user_agent.is_mobile
-    data={
-            'indseo':seo,
-            'BlogData':blogdata,
-            'mainnews':mainnews,
-            'event':events,
-            'bplogo':bp,
-            'Slider':slider,
-            'Blogcat':Category,
-            'latnews':latestnews,
-            'adtop':adtop,
-            'adleft':adleft,
-            'adright':adright,
-            'adtl':adtopleft,
-            'adtr':adtopright,
-            'bgad':festive,
-            'headtopad':tophead,
-            'popup':popupad,
-            'Articale':articales,
-            'vidart':vidarticales,
-            'headline':headline,
-            'trendpost':trending,
-            'bnews':brknews,
-            'vidnews':podcast,
-            'is_mobile': is_mobile,
-        }
-   
-    return render(request,'all-video-news.html',data)
-    #return render(request, 'index.html')
+
+    data = {
+        "indseo": seo,
+        "BlogData": blogdata,
+        "mainnews": mainnews,
+        "event": events,
+        "bplogo": bp,
+        "Slider": slider,
+        "Blogcat": Category,
+        "latnews": latestnews,
+        "adtop": adtop,
+        "adleft": adleft,
+        "adright": adright,
+        "adtl": adtopleft,
+        "adtr": adtopright,
+        "bgad": festive,
+        "headtopad": tophead,
+        "popup": popupad,
+        "Articale": articales,
+        "vidart": vidarticales,
+        "headline": headline,
+        "trendpost": trending,
+        "bnews": brknews,
+        "vidnews": podcast,
+        "is_mobile": is_mobile,
+    }
+
+    return render(request, "all-video-news.html", data)
 # Video-all-News-details-page--end--------
 
 
@@ -691,164 +936,299 @@ def eventdetails(request,slug):
     return render(request,'eventdetails.html',data)
 
 # News-details-page----------
-def videonewsdetails(request,slug):
-    counter=VideoNews.objects.get(slug=slug)
-    counter.viewcounter=counter.viewcounter + 1
-    counter.save()
-    seo='video'
-    current_datetime = datetime.now()
-    viddetails=VideoNews.objects.get(slug=slug)
-    blogdata=NewsPost.objects.filter(schedule_date__lt=current_datetime,is_active=1,status='active').order_by('-id') [:20]
-    mainnews=NewsPost.objects.filter(status='active').order_by('order')[:4]
-    articales=NewsPost.objects.filter(schedule_date__lt=current_datetime,articles=1,status='active').order_by('-id') [:3]
-    
-    vidarticales=VideoNews.objects.filter(schedule_date__lt=current_datetime,articles=1,is_active='active',video_type='video').order_by('order')[:8]
-    headline=NewsPost.objects.filter(schedule_date__lt=current_datetime,Head_Lines=1,status='active').order_by('-id') [:14]
-    trending=NewsPost.objects.filter(schedule_date__lt=current_datetime,trending=1,status='active').order_by('-id') [:4]
-    brknews=NewsPost.objects.filter(schedule_date__lt=current_datetime,BreakingNews=1,status='active').order_by('-id') [:8]
-    podcast=VideoNews.objects.filter(schedule_date__lt=current_datetime,is_active='active').order_by('-id') [:1]
-    # --------------ad-manage-meny--------------
-    adtlid=ad_category.objects.get(ads_cat_slug='topleft-600x80')
-    adtopleft=ad.objects.filter(ads_cat_id=adtlid.id, is_active=1).order_by('-id') [:1]
-    
-    adtrid=ad_category.objects.get(ads_cat_slug='topright-600x80')
-    adtopright=ad.objects.filter(ads_cat_id=adtrid.id, is_active=1).order_by('-id') [:1]
-    
-    adtopid=ad_category.objects.get(ads_cat_slug='leaderboard')
-    adtop=ad.objects.filter(ads_cat_id=adtopid.id, is_active=1).order_by('-id') [:1]
-    
-    adleftid=ad_category.objects.get(ads_cat_slug='skyscraper')
-    adleft=ad.objects.filter(ads_cat_id=adleftid.id, is_active=1).order_by('-id') [:1]
-    
-    adrcol=ad_category.objects.get(ads_cat_slug='mrec')
-    adright=ad.objects.filter(ads_cat_id=adrcol.id, is_active=1).order_by('-id') [:1]
-    
-    festbg=ad_category.objects.get(ads_cat_slug='festivebg')
-    festive=ad.objects.filter(ads_cat_id=festbg.id, is_active=1).order_by('-id') [:1]
-    
-    # festivetop
-    # festiveleft
-    # festiveright
-# -------------end-ad-manage-meny--------------    
-    # slider=NewsPost.objects.filter(id=1).order_by('id')[:5] use for filter value
-    Category=category.objects.filter(cat_status='active').order_by('order') [:12]
-    slider=NewsPost.objects.filter().order_by('-id')[:5]
-    latestnews=NewsPost.objects.all().order_by('-id')[:5]
+def videonewsdetails(request, slug):
+
+    current_datetime = timezone.now()
+
+    # ---------------- VIEW COUNTER ----------------
+    VideoNews.objects.filter(slug=slug).update(
+        viewcounter=F("viewcounter") + 1
+    )
+
+    # ---------------- VIDEO DETAILS ----------------
+    viddetails = VideoNews.objects.select_related(
+        "News_Category"
+    ).get(slug=slug)
+
+    seo = "video"
+
+    # ---------------- BASE NEWS QUERY ----------------
+    news_base = NewsPost.objects.select_related(
+        "journalist",
+        "post_cat",
+        "post_cat__sub_cat"
+    ).filter(
+        schedule_date__lt=current_datetime,
+        status=STATUS_ACTIVE
+    )
+
+    blogdata = news_base.filter(
+        is_active=IS_ACTIVE
+    ).order_by("-id")[:20]
+
+    mainnews = NewsPost.objects.filter(
+        status=STATUS_ACTIVE
+    ).order_by("order")[:4]
+
+    articales = news_base.filter(
+        articles=1
+    ).order_by("-id")[:3]
+
+    headline = news_base.filter(
+        Head_Lines=1
+    ).order_by("-id")[:14]
+
+    trending = news_base.filter(
+        trending=1
+    ).order_by("-id")[:4]
+
+    brknews = news_base.filter(
+        BreakingNews=1
+    ).order_by("-id")[:8]
+
+    # ---------------- VIDEO QUERY ----------------
+    videos_base = VideoNews.objects.select_related(
+        "News_Category"
+    ).filter(
+        schedule_date__lt=current_datetime,
+        is_active=STATUS_ACTIVE
+    )
+
+    vidarticales = videos_base.filter(
+        articles=1,
+        video_type="video"
+    ).order_by("order")[:8]
+
+    podcast = videos_base.order_by("-id")[:1]
+
+    # ---------------- ADS (OPTIMIZED) ----------------
+    ad_categories = ad_category.objects.in_bulk(field_name="ads_cat_slug")
+
+    ads = ad.objects.select_related("ads_cat").filter(
+        is_active=IS_ACTIVE
+    )
+
+    def get_ads(slug, limit):
+        cat = ad_categories.get(slug)
+        if not cat:
+            return []
+        return ads.filter(
+            ads_cat_id=cat.id
+        ).order_by("-id")[:limit]
+
+    adtopleft = get_ads("topleft-600x80", 1)
+    adtopright = get_ads("topright-600x80", 1)
+    adtop = get_ads("leaderboard", 1)
+    adleft = get_ads("skyscraper", 1)
+    adright = get_ads("mrec", 1)
+    festive = get_ads("festivebg", 1)
+
+    # ---------------- CATEGORY ----------------
+    Category = category.objects.prefetch_related(
+        "sub_category_set"
+    ).filter(
+        cat_status=STATUS_ACTIVE
+    ).order_by("order")[:12]
+
+    # ---------------- SLIDER ----------------
+    slider = news_base.order_by("-id")[:5]
+
+    latestnews = news_base.order_by("-id")[:5]
+
+    # ---------------- USER AGENT ----------------
     user_agent = get_user_agent(request)
     is_mobile = user_agent.is_mobile
-    data={
-            'indseo':seo,
-            'Vnews':viddetails,
-            'BlogData':blogdata,
-            'mainnews':mainnews,
-            'Slider':slider,
-            'Blogcat':Category,
-            'latnews':latestnews,
-            'adtop':adtop,
-            'adleft':adleft,
-            'adright':adright,
-            'adtl':adtopleft,
-            'adtr':adtopright,
-            'bgad':festive,
-            'Articale':articales,
-            'vidart':vidarticales,
-            'headline':headline,
-            'trendpost':trending,
-            'bnews':brknews,
-            'vidnews':podcast,
-            'is_mobile': is_mobile,
-        }
-    return render(request,'video-news-details.html',data)
-    #return render(request, 'index.html')
+
+    data = {
+        "indseo": seo,
+        "Vnews": viddetails,
+        "BlogData": blogdata,
+        "mainnews": mainnews,
+        "Slider": slider,
+        "Blogcat": Category,
+        "latnews": latestnews,
+        "adtop": adtop,
+        "adleft": adleft,
+        "adright": adright,
+        "adtl": adtopleft,
+        "adtr": adtopright,
+        "bgad": festive,
+        "Articale": articales,
+        "vidart": vidarticales,
+        "headline": headline,
+        "trendpost": trending,
+        "bnews": brknews,
+        "vidnews": podcast,
+        "is_mobile": is_mobile,
+    }
+
+    return render(request, "video-news-details.html", data)
 # News-details-page--end--------
 
 
 # cat-details-page---------
-def catdetails(request,catlink,slug):
-    current_datetime = datetime.now()
-    seourl='/'+catlink+'/'+slug
-    seoslug = seourl.replace("-", " ").upper()
-   
-    try:
-        seo = seo_optimization.objects.filter(pageslug=seourl).first()
-    except seo_optimization.DoesNotExist:
-        seo=seo_optimization.objects.get(pageslug='https://www.dxbnewsnetwork.com/')
+def catdetails(request, catlink, slug):
 
+    current_datetime = timezone.now()
+
+    seourl = '/' + catlink + '/' + slug
+    seoslug = seourl.replace("-", " ").upper()
+
+    # ---------------- SEO ----------------
+    seo = seo_optimization.objects.filter(pageslug=seourl).first()
+
+    if not seo:
+        seo = seo_optimization.objects.filter(
+            pageslug='https://www.dxbnewsnetwork.com/'
+        ).first()
+
+    # ---------------- SUBCATEGORY ----------------
     subcatid = sub_category.objects.get(subcat_slug=slug)
 
-    Latest_News = NewsPost.objects.filter(post_cat=subcatid.id, schedule_date__lt=current_datetime,is_active=1, status='active').order_by('-id')[:3]
-    blogdata_list = NewsPost.objects.filter(post_cat=subcatid.id, schedule_date__lt=current_datetime, status='active').order_by('-id')
-    headline = NewsPost.objects.filter(post_cat=subcatid.id, schedule_date__lt=current_datetime, Head_Lines=1, status='active').order_by('-id')
-    articales = NewsPost.objects.filter(post_cat=subcatid.id, schedule_date__lt=current_datetime, articles=1, status='active').order_by('-id')
-    trending = NewsPost.objects.filter(post_cat=subcatid.id, schedule_date__lt=current_datetime, trending=1, status='active').order_by('-id')
-    brknews = NewsPost.objects.filter(post_cat=subcatid.id, schedule_date__lt=current_datetime, BreakingNews=1, status='active').order_by('-id')
-    videos = VideoNews.objects.filter(schedule_date__lt=current_datetime, is_active='active', video_type='video').order_by('order')
-    reels = VideoNews.objects.filter(News_Category=subcatid.id,schedule_date__lt=current_datetime, is_active='active', video_type='reel').order_by('order')
-    podcast = VideoNews.objects.filter(News_Category=subcatid.id,schedule_date__lt=current_datetime, is_active='active').order_by('order')
+    # ---------------- BASE NEWS QUERY ----------------
+    base_news = NewsPost.objects.select_related(
+        "journalist",
+        "post_cat",
+        "post_cat__sub_cat"
+    ).filter(
+        post_cat=subcatid.id,
+        schedule_date__lt=current_datetime,
+        status=STATUS_ACTIVE
+    )
 
+    Latest_News = base_news.filter(is_active=IS_ACTIVE).order_by('-id')[:3]
+
+    blogdata_list = base_news.order_by('-id')
+
+    headline = base_news.filter(Head_Lines=1).order_by('-id')
+
+    articales = base_news.filter(articles=1).order_by('-id')
+
+    trending = base_news.filter(trending=1).order_by('-id')
+
+    brknews = base_news.filter(BreakingNews=1).order_by('-id')
+
+    # ---------------- VIDEOS ----------------
+    videos_base = VideoNews.objects.select_related(
+        "News_Category"
+    ).filter(
+        schedule_date__lt=current_datetime,
+        is_active=STATUS_ACTIVE
+    )
+
+    videos = videos_base.filter(
+        video_type='video'
+    ).order_by('order')
+
+    reels = videos_base.filter(
+        News_Category=subcatid.id,
+        video_type='reel'
+    ).order_by('order')
+
+    podcast = videos_base.filter(
+        News_Category=subcatid.id
+    ).order_by('order')
+
+    # ---------------- PAGINATION ----------------
     blogdata = Paginator(blogdata_list, 12).get_page(request.GET.get('page'))
-    headline_page = Paginator(headline, 5).get_page(request.GET.get('headline_page'))
-    articles_page = Paginator(articales, 5).get_page(request.GET.get('articles_page'))
-    trending_page = Paginator(trending, 7).get_page(request.GET.get('trending_page'))
-    brknews_page = Paginator(brknews, 8).get_page(request.GET.get('brknews_page'))
-    videos_page = Paginator(videos, 10).get_page(request.GET.get('videos_page'))
-    reels_page = Paginator(reels, 10).get_page(request.GET.get('reels_page'))
-    podcast_page = Paginator(podcast, 7).get_page(request.GET.get('podcast_page'))
 
+    headline_page = Paginator(headline, 5).get_page(
+        request.GET.get('headline_page')
+    )
+
+    articles_page = Paginator(articales, 5).get_page(
+        request.GET.get('articles_page')
+    )
+
+    trending_page = Paginator(trending, 7).get_page(
+        request.GET.get('trending_page')
+    )
+
+    brknews_page = Paginator(brknews, 8).get_page(
+        request.GET.get('brknews_page')
+    )
+
+    videos_page = Paginator(videos, 10).get_page(
+        request.GET.get('videos_page')
+    )
+
+    reels_page = Paginator(reels, 10).get_page(
+        request.GET.get('reels_page')
+    )
+
+    podcast_page = Paginator(podcast, 7).get_page(
+        request.GET.get('podcast_page')
+    )
+
+    # ---------------- VIDEO URL ----------------
     for video in videos_page:
         video.get_absolute_url = lambda slug=video.slug: f"/video/{slug}"
 
+    # ---------------- ADS ----------------
+    ad_categories = ad_category.objects.in_bulk(field_name="ads_cat_slug")
 
-    # --------------ad-manage-meny--------------
-    adtlid=ad_category.objects.get(ads_cat_slug='topleft-600x80')
-    adtopleft=ad.objects.filter(ads_cat_id=adtlid.id, is_active=1).order_by('-id') [:1]
-    
-    adtrid=ad_category.objects.get(ads_cat_slug='topright-600x80')
-    adtopright=ad.objects.filter(ads_cat_id=adtrid.id, is_active=1).order_by('-id') [:1]
-    
-    adtopid=ad_category.objects.get(ads_cat_slug='leaderboard')
-    adtop=ad.objects.filter(ads_cat_id=adtopid.id, is_active=1).order_by('-id') [:1]
-    
-    adleftid=ad_category.objects.get(ads_cat_slug='skyscraper')
-    adleft=ad.objects.filter(ads_cat_id=adleftid.id, is_active=1).order_by('-id') [:1]
-    
-    adrcol=ad_category.objects.get(ads_cat_slug='mrec')
-    adright=ad.objects.filter(ads_cat_id=adrcol.id, is_active=1).order_by('-id') [:1]
-    festbg=ad_category.objects.get(ads_cat_slug='festivebg')
-    festive=ad.objects.filter(ads_cat_id=festbg.id, is_active=1).order_by('-id') [:1]
-    
-# -------------end-ad-manage-meny--------------   
-    Category=category.objects.filter(cat_status='active').order_by('order') [:12]
-    slider=NewsPost.objects.filter().order_by('-id')[:5]
-    latestnews=NewsPost.objects.all().order_by('-id')[:5]
+    ads = ad.objects.select_related("ads_cat").filter(is_active=IS_ACTIVE)
+
+    def get_ads(slug, limit):
+        cat = ad_categories.get(slug)
+        if not cat:
+            return []
+        return ads.filter(ads_cat_id=cat.id).order_by("-id")[:limit]
+
+    adtopleft = get_ads("topleft-600x80", 1)
+    adtopright = get_ads("topright-600x80", 1)
+    adtop = get_ads("leaderboard", 1)
+    adleft = get_ads("skyscraper", 1)
+    adright = get_ads("mrec", 1)
+    festive = get_ads("festivebg", 1)
+
+    # ---------------- CATEGORY ----------------
+    Category = category.objects.prefetch_related(
+        "sub_category_set"
+    ).filter(
+        cat_status=STATUS_ACTIVE
+    ).order_by('order')[:12]
+
+    # ---------------- SLIDER ----------------
+    slider = NewsPost.objects.select_related(
+        "journalist"
+    ).order_by('-id')[:5]
+
+    latestnews = NewsPost.objects.select_related(
+        "journalist"
+    ).order_by('-id')[:5]
+
+    # ---------------- USER AGENT ----------------
     user_agent = get_user_agent(request)
     is_mobile = user_agent.is_mobile
-    data={ 
-            'indseo':seo,
-            'sslug':seoslug,
-            'slugurl':catlink+'/'+slug,
-            'latestnews':Latest_News,
-            'BlogData':blogdata,
-            'headline': headline_page,
-            'Articale': articles_page,
-            'trendpost': trending_page,
-            'breakingnews': brknews_page,
-            'videos': videos_page,
-            'reels': reels_page,
-            'vidnews': podcast_page,
-            'Slider':slider,
-            'Blogcat':Category,
-            'latnews':latestnews,
-            'adtop':adtop,
-            'adleft':adleft,
-            'adright':adright,
-            'adtl':adtopleft,
-            'adtr':adtopright,
-            'bgad':festive,
-            'is_mobile': is_mobile,
-        }
 
-    return render(request,'category.html',data)
+    # ---------------- DATA ----------------
+    data = {
+        'indseo': seo,
+        'sslug': seoslug,
+        'slugurl': catlink + '/' + slug,
+        'latestnews': Latest_News,
+        'BlogData': blogdata,
+        'headline': headline_page,
+        'Articale': articles_page,
+        'trendpost': trending_page,
+        'breakingnews': brknews_page,
+        'videos': videos_page,
+        'reels': reels_page,
+        'vidnews': podcast_page,
+        'Slider': slider,
+        'Blogcat': Category,
+        'latnews': latestnews,
+        'adtop': adtop,
+        'adleft': adleft,
+        'adright': adright,
+        'adtl': adtopleft,
+        'adtr': adtopright,
+        'bgad': festive,
+        'is_mobile': is_mobile,
+    }
+
+    return render(request, 'category.html', data)
 # cat-details-page--end--------
 
 
