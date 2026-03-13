@@ -118,10 +118,12 @@
                 <div class="nav-item dropdown">
                     <a href="#" class="nav-link dropdown-toggle" data-bs-toggle="dropdown">{{ link.cat_name }}</a>
                     <div class="dropdown-menu rounded-0 m-0">
-                        {% for sublink in link.sub_category_set.all %}
+                        {% for sublink in link.sub_category_set.all|dictsort:"subcat_status" %}
+                        {% if sublink.subcat_status == 'active' %}
                         <a href="/{{ link.cat_slug }}/{{ sublink.subcat_slug }}" class="dropdown-item">
                             {{ sublink.subcat_name }}
                         </a>
+                        {% endif %}
                         {% endfor %}
                     </div>
                 </div>
