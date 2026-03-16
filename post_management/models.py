@@ -14,6 +14,7 @@ from autoslug import AutoSlugField
 from io import BytesIO
 from django.core.files.base import ContentFile
 from PIL import Image
+import os
 
 class category(models.Model):
     cat_name=models.CharField(max_length=255,unique=True,null=True,default=None)
@@ -116,6 +117,37 @@ class NewsPost(models.Model):
     status = models.CharField(max_length=8, choices=STATUS_CHOICES, default='active')
     author = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True, default=None)
     journalist = models.ForeignKey(Journalist, on_delete=models.CASCADE, null=True, blank=True, default=None)
+    
+    @property
+    def thumbnail_url(self):
+        """
+        Returns thumbnail URL if exists (WEBP > JPG > JPEG > PNG),
+        else returns original image URL.
+        """
+
+        if not self.post_image:
+            return ""
+
+        original_url = self.post_image.url
+        original_path = self.post_image.path
+
+        base_name, _ = os.path.splitext(os.path.basename(original_path))
+        root_dir = os.path.dirname(original_path)
+        thumb_dir = os.path.join(root_dir, "thumbnails")
+
+        # Priority order: fastest → fallback
+        thumbnail_extensions = [".webp", ".jpg", ".jpeg", ".png"]
+
+        for ext in thumbnail_extensions:
+            thumb_path = os.path.join(thumb_dir, f"{base_name}{ext}")
+            if os.path.exists(thumb_path):
+                return original_url.replace(
+                    os.path.basename(original_url),
+                    f"thumbnails/{base_name}{ext}"
+                )
+
+        # Fallback to original image
+        return original_url
 
     def get_posted_by(self):
         if self.journalist:

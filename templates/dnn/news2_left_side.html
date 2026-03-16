@@ -11,7 +11,8 @@
         {% for news in LatestNews %}
         <div class="items_background d-flex border-bottom my-3 p-2">
           <a style="display: flex;" href="/{{ news.slug }}">
-            <img style="object-fit: contain !important;" src="../upload/{{ news.post_image }}" />
+            <img style="object-fit: contain !important;" src="{{news.thumbnail_url}}" />
+
           </a>
           <div class="text-left col-9">
             <h6 class="mb-1">
@@ -37,7 +38,8 @@
         {% for news in trendpost %}
         <div class="items_background d-flex border-bottom my-3 p-2">
           <a style="display: flex;" href="/{{ news.slug }}">
-            <img style="object-fit: contain !important;" src="../upload/{{ news.post_image }}" />
+            <img style="object-fit: contain !important;" src="{{news.thumbnail_url}}" />
+            
           </a>
           <div class="text-left col-9">
             <h6 class="mb-1">

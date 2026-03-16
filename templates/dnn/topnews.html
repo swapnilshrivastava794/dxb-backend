@@ -104,7 +104,8 @@
         <div class="swiper trending-thumb-swiper">
           <div class="swiper-wrapper">
             {% for news in headline %}
-            <div class="swiper-slide"><img src="{{ news.post_image.url }}" alt="{{ news.post_title }}"
+            <div class="swiper-slide"><img src="{{ news.thumbnail_url }}" alt="{{ news.post_title }}"
+              
                 title="{{ news.post_title }}" loading="lazy"></div>
             {% endfor %}
           </div>
