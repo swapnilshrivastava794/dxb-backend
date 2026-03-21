@@ -2,7 +2,7 @@ import logging
 logger = logging.getLogger(__name__)
 from django.http import HttpResponse
 from django.db.models import Q, F
-from post_management.models import category,sub_category,NewsPost,VideoNews,Tag
+from post_management.models import category,sub_category,NewsPost,VideoNews,Tag, NewsRedirect
 from setting.models import profile_setting, CMS
 from Ad_management.models import ad_category
 from Ad_management.models import ad
@@ -27,6 +27,7 @@ from django.core.cache import cache
 from django.views.decorators.csrf import csrf_exempt
 from itertools import islice
 from journalist.models import Journalist
+from django.core.exceptions import ObjectDoesNotExist
 
 from PIL import ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -267,139 +268,148 @@ def home(request):
 
 # News-details-page----------
 def newsdetails(request, slug):
+    try:
+        current_datetime = timezone.now()
 
-    current_datetime = timezone.now()
+        # ---------------- VIEW COUNTER ----------------
+        NewsPost.objects.filter(slug=slug).update(
+            viewcounter=F("viewcounter") + 1
+        )
 
-    # ---------------- VIEW COUNTER ----------------
-    NewsPost.objects.filter(slug=slug).update(
-        viewcounter=F("viewcounter") + 1
-    )
+        # ---------------- BLOG DETAILS ----------------
+        blogdetails = get_object_or_404(
+            NewsPost.objects.select_related(
+                "journalist",
+                "post_cat",
+                "post_cat__sub_cat"
+            ),
+            slug=slug,
+            status=STATUS_ACTIVE
+        )
 
-    # ---------------- BLOG DETAILS ----------------
-    blogdetails = get_object_or_404(
-        NewsPost.objects.select_related(
+        # ---------------- BASE NEWS QUERY ----------------
+        base_news = NewsPost.objects.select_related(
             "journalist",
             "post_cat",
             "post_cat__sub_cat"
-        ),
-        slug=slug,
-        status=STATUS_ACTIVE
-    )
+        ).filter(
+            schedule_date__lt=current_datetime,
+            status=STATUS_ACTIVE
+        )
 
-    # ---------------- BASE NEWS QUERY ----------------
-    base_news = NewsPost.objects.select_related(
-        "journalist",
-        "post_cat",
-        "post_cat__sub_cat"
-    ).filter(
-        schedule_date__lt=current_datetime,
-        status=STATUS_ACTIVE
-    )
+        # ---------------- NEWS ----------------
+        blogdata = base_news.filter(
+            is_active=IS_ACTIVE
+        ).order_by("-id")[:9]
 
-    # ---------------- NEWS ----------------
-    blogdata = base_news.filter(
-        is_active=IS_ACTIVE
-    ).order_by("-id")[:9]
+        mainnews = base_news.filter(
+            is_active=IS_ACTIVE
+        ).order_by("-id")[:2]
 
-    mainnews = base_news.filter(
-        is_active=IS_ACTIVE
-    ).order_by("-id")[:2]
+        articales = base_news.filter(
+            articles=1
+        ).order_by("-id")[:3]
 
-    articales = base_news.filter(
-        articles=1
-    ).order_by("-id")[:3]
+        headline = base_news.filter(
+            Head_Lines=1
+        ).order_by("-id")[:4]
 
-    headline = base_news.filter(
-        Head_Lines=1
-    ).order_by("-id")[:4]
+        trending = base_news.filter(
+            trending=1
+        ).order_by("-id")[:8]
 
-    trending = base_news.filter(
-        trending=1
-    ).order_by("-id")[:8]
+        brknews = base_news.filter(
+            BreakingNews=1
+        ).order_by("-id")[:8]
 
-    brknews = base_news.filter(
-        BreakingNews=1
-    ).order_by("-id")[:8]
+        # ---------------- VIDEO ----------------
+        videos_base = VideoNews.objects.select_related(
+            "News_Category"
+        ).filter(is_active=STATUS_ACTIVE)
 
-    # ---------------- VIDEO ----------------
-    videos_base = VideoNews.objects.select_related(
-        "News_Category"
-    ).filter(is_active=STATUS_ACTIVE)
+        podcast = videos_base.order_by("-id")[:1]
 
-    podcast = videos_base.order_by("-id")[:1]
+        vidarticales = videos_base.filter(
+            articles=1,
+            video_type="video"
+        ).order_by("order")[:2]
 
-    vidarticales = videos_base.filter(
-        articles=1,
-        video_type="video"
-    ).order_by("order")[:2]
+        # ---------------- ADS ----------------
+        ad_categories = ad_category.objects.in_bulk(field_name="ads_cat_slug")
 
-    # ---------------- ADS ----------------
-    ad_categories = ad_category.objects.in_bulk(field_name="ads_cat_slug")
+        ads = ad.objects.select_related("ads_cat").filter(is_active=IS_ACTIVE)
 
-    ads = ad.objects.select_related("ads_cat").filter(is_active=IS_ACTIVE)
+        def get_ads(slug, limit):
+            cat = ad_categories.get(slug)
+            if not cat:
+                return []
+            return ads.filter(ads_cat_id=cat.id).order_by("-id")[:limit]
 
-    def get_ads(slug, limit):
-        cat = ad_categories.get(slug)
-        if not cat:
-            return []
-        return ads.filter(ads_cat_id=cat.id).order_by("-id")[:limit]
+        leftsquqre = get_ads("left-fest-square", 4)
+        adtopleft = get_ads("topleft-600x80", 1)
+        adtopright = get_ads("topright-600x80", 1)
+        adtop = get_ads("leaderboard", 1)
+        adleft = get_ads("skyscraper", 1)
+        adright = get_ads("mrec", 1)
+        festive = get_ads("festivebg", 1)
 
-    leftsquqre = get_ads("left-fest-square", 4)
-    adtopleft = get_ads("topleft-600x80", 1)
-    adtopright = get_ads("topright-600x80", 1)
-    adtop = get_ads("leaderboard", 1)
-    adleft = get_ads("skyscraper", 1)
-    adright = get_ads("mrec", 1)
-    festive = get_ads("festivebg", 1)
+        # ---------------- CATEGORY ----------------
+        Category = category.objects.prefetch_related(
+            "sub_category_set"
+        ).filter(
+            cat_status=STATUS_ACTIVE
+        ).order_by("order")[:12]
 
-    # ---------------- CATEGORY ----------------
-    Category = category.objects.prefetch_related(
-        "sub_category_set"
-    ).filter(
-        cat_status=STATUS_ACTIVE
-    ).order_by("order")[:12]
+        # ---------------- SLIDER ----------------
+        slider = NewsPost.objects.select_related(
+            "journalist"
+        ).order_by("-id")[:5]
 
-    # ---------------- SLIDER ----------------
-    slider = NewsPost.objects.select_related(
-        "journalist"
-    ).order_by("-id")[:5]
+        latestnews = NewsPost.objects.select_related(
+            "journalist"
+        ).order_by("-id")[:5]
 
-    latestnews = NewsPost.objects.select_related(
-        "journalist"
-    ).order_by("-id")[:5]
+        # ---------------- USER AGENT ----------------
+        user_agent = get_user_agent(request)
+        is_mobile = user_agent.is_mobile
 
-    # ---------------- USER AGENT ----------------
-    user_agent = get_user_agent(request)
-    is_mobile = user_agent.is_mobile
+        # ---------------- SEO ----------------
+        seo = "ndetail"
 
-    # ---------------- SEO ----------------
-    seo = "ndetail"
+        data = {
+            "indseo": seo,
+            "Blogdetails": blogdetails,
+            "BlogData": blogdata,
+            "mainnews": mainnews,
+            "Slider": slider,
+            "Blogcat": Category,
+            "latnews": latestnews,
+            "adtop": adtop,
+            "adleft": adleft,
+            "adright": adright,
+            "adtl": adtopleft,
+            "adtr": adtopright,
+            "bgad": festive,
+            "lfs": leftsquqre,
+            "Articale": articales,
+            "vidart": vidarticales,
+            "headline": headline,
+            "trendpost": trending,
+            "bnews": brknews,
+            "vidnews": podcast,
+            "is_mobile": is_mobile,
+        }
 
-    data = {
-        "indseo": seo,
-        "Blogdetails": blogdetails,
-        "BlogData": blogdata,
-        "mainnews": mainnews,
-        "Slider": slider,
-        "Blogcat": Category,
-        "latnews": latestnews,
-        "adtop": adtop,
-        "adleft": adleft,
-        "adright": adright,
-        "adtl": adtopleft,
-        "adtr": adtopright,
-        "bgad": festive,
-        "lfs": leftsquqre,
-        "Articale": articales,
-        "vidart": vidarticales,
-        "headline": headline,
-        "trendpost": trending,
-        "bnews": brknews,
-        "vidnews": podcast,
-        "is_mobile": is_mobile,
-    }
-
-    return render(request, "news-details.html", data)  
+        return render(request, "news-details.html", data)  
+    except Http404:
+        # Check if there's a redirect for this slug
+        try:
+            news_redirect = NewsRedirect.objects.get(old_slug=slug, is_active=True)
+            # Perform a 301 permanent redirect (best for SEO)
+            return redirect('newsdetails', slug=news_redirect.redirect_slug, permanent=True)
+        except NewsRedirect.DoesNotExist:
+            # No redirect found, show 404
+            raise Http404("News post not found")
     
 # News-details-page--end--------
 # News-pdf--------
